@@ -66,7 +66,7 @@
 
 static
 inline 
-uint32_t CPU_TO_BE32(uint32_t p) // TODO: detect endianness and allow passthru
+uint32_t CPU_TO_BE32(uint32_t p) 
 {
     const uint8_t * bytes = (const uint8_t *)&p;
     uint32_t out = 
@@ -77,17 +77,15 @@ uint32_t CPU_TO_BE32(uint32_t p) // TODO: detect endianness and allow passthru
     return out;
 }
 
-static inline int FLS(unsigned int x)
+static inline int FLS(uint32_t x)
 {
-    // TODO: allow the assembly code for fls as from http://lxr.free-electrons.com/source/arch/x86/include/asm/bitops.h
-    int r = 32;
-    if (!x) return 0;
-    if (!(x & 0xffff0000u)) { x <<= 16; r -= 16; }
-    if (!(x & 0xff000000u)) { x <<= 8; r -= 8; }
-    if (!(x & 0xf0000000u)) { x <<= 4; r -= 4; }
-    if (!(x & 0xc0000000u)) { x <<= 2; r -= 2; }
-    if (!(x & 0x80000000u)) { x <<= 1; r -= 1; }
-    return r;
+    int r=0;
+    if (x>=(1<<16)) { r+=16;x>>=16; }
+    if (x>=(1<< 8)) { r+= 8;x>>= 8; }
+    if (x>=(1<< 4)) { r+= 4;x>>= 4; }
+    if (x>=(1<< 2)) { r+= 2;x>>= 2; }
+    if (x>=(1<< 1)) { r+= 1;x>>= 1; }
+    return r+x;
 }
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
