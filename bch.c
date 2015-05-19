@@ -34,12 +34,6 @@
  * to decode_bch in order to skip certain steps. See decode_bch() documentation
  * for details.
  *
- * Option CONFIG_BCH_CONST_PARAMS can be used to force fixed values of
- * parameters m and t; thus allowing extra compiler optimizations and providing
- * better (up to 2x) encoding performance. Using this option makes sense when
- * (m,t) are fixed and known in advance, e.g. when using BCH error correction
- * on a particular NAND flash device.
- *
  * Algorithmic details:
  *
  * Encoding is performed by processing 32 input bits in parallel, using 4
@@ -65,23 +59,45 @@
  * finite fields GF(2^q). In Rapport de recherche INRIA no 2829, 1996.
  */
 
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/bitops.h>
-#include <asm/byteorder.h>
-#include <linux/bch.h>
+#include <stdlib.h>
+#include <string.h>
+#include "bch.h"
+#include <errno.h>
 
-#if defined(CONFIG_BCH_CONST_PARAMS)
-#define GF_M(_p)               (CONFIG_BCH_CONST_M)
-#define GF_T(_p)               (CONFIG_BCH_CONST_T)
-#define GF_N(_p)               ((1 << (CONFIG_BCH_CONST_M))-1)
-#else
+static
+inline 
+uint32_t CPU_TO_BE32(uint32_t p) // TODO: detect endianness and allow passthru
+{
+    const uint8_t * bytes = (const uint8_t *)&p;
+    uint32_t out = 
+        ((uint32_t)bytes[0] << 24) |
+        (bytes[1] << 16) |
+        (bytes[2] << 8) |
+        (bytes[3] )  ;
+    return out;
+}
+
+static inline int FLS(unsigned int x)
+{
+    // TODO: allow the assembly code for fls as from http://lxr.free-electrons.com/source/arch/x86/include/asm/bitops.h
+    int r = 32;
+    if (!x) return 0;
+    if (!(x & 0xffff0000u)) { x <<= 16; r -= 16; }
+    if (!(x & 0xff000000u)) { x <<= 8; r -= 8; }
+    if (!(x & 0xf0000000u)) { x <<= 4; r -= 4; }
+    if (!(x & 0xc0000000u)) { x <<= 2; r -= 2; }
+    if (!(x & 0x80000000u)) { x <<= 1; r -= 1; }
+    return r;
+}
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof(*(a)))
+
 #define GF_M(_p)               ((_p)->m)
 #define GF_T(_p)               ((_p)->t)
 #define GF_N(_p)               ((_p)->n)
+
+#ifndef DIV_ROUND_UP
+#define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
 #endif
 
 #define BCH_ECC_WORDS(_p)      DIV_ROUND_UP(GF_M(_p)*GF_T(_p), 32)
@@ -230,7 +246,7 @@ void encode_bch(struct bch_control *bch, const uint8_t *data,
          */
         while (mlen--) {
                 /* input data is read in big-endian format */
-                w = r[0]^cpu_to_be32(*pdata++);
+                w = r[0]^CPU_TO_BE32(*pdata++);
                 p0 = tab0 + (l+1)*((w >>  0) & 0xff);
                 p1 = tab1 + (l+1)*((w >>  8) & 0xff);
                 p2 = tab2 + (l+1)*((w >> 16) & 0xff);
@@ -251,7 +267,6 @@ void encode_bch(struct bch_control *bch, const uint8_t *data,
         if (ecc)
                 store_ecc8(bch, ecc, bch->ecc_buf);
 }
-EXPORT_SYMBOL_GPL(encode_bch);
 
 static inline int modulo(struct bch_control *bch, unsigned int v)
 {
@@ -275,7 +290,7 @@ static inline int mod_s(struct bch_control *bch, unsigned int v)
 static inline int deg(unsigned int poly)
 {
         /* polynomial degree is the most-significant bit index */
-        return fls(poly)-1;
+        return FLS(poly)-1;
 }
 
 static inline int parity(unsigned int x)
@@ -1043,7 +1058,6 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
         }
         return (err >= 0) ? err : -EBADMSG;
 }
-EXPORT_SYMBOL_GPL(decode_bch);
 
 /*
  * generate Galois field lookup tables
@@ -1152,7 +1166,7 @@ static void *bch_alloc(size_t size, int *err)
 {
         void *ptr;
 
-        ptr = kmalloc(size, GFP_KERNEL);
+        ptr = malloc(size);
         if (ptr == NULL)
                 *err = 1;
         return ptr;
@@ -1170,12 +1184,12 @@ static uint32_t *compute_generator_polynomial(struct bch_control *bch)
         struct gf_poly *g;
         uint32_t *genpoly;
 
-        g = bch_alloc(GF_POLY_SZ(m*t), &err);
-        roots = bch_alloc((bch->n+1)*sizeof(*roots), &err);
-        genpoly = bch_alloc(DIV_ROUND_UP(m*t+1, 32)*sizeof(*genpoly), &err);
+        g = (struct gf_poly*)bch_alloc(GF_POLY_SZ(m*t), &err);
+        roots = (unsigned int*)bch_alloc((bch->n+1)*sizeof(*roots), &err);
+        genpoly = (uint32_t*)bch_alloc(DIV_ROUND_UP(m*t+1, 32)*sizeof(*genpoly), &err);
 
         if (err) {
-                kfree(genpoly);
+                free(genpoly);
                 genpoly = NULL;
                 goto finish;
         }
@@ -1219,8 +1233,8 @@ static uint32_t *compute_generator_polynomial(struct bch_control *bch)
         bch->ecc_bits = g->deg;
 
 finish:
-        kfree(g);
-        kfree(roots);
+        free(g);
+        free(roots);
 
         return genpoly;
 }
@@ -1262,14 +1276,6 @@ struct bch_control *init_bch(int m, int t, unsigned int prim_poly)
                 0x402b, 0x8003,
         };
 
-#if defined(CONFIG_BCH_CONST_PARAMS)
-        if ((m != (CONFIG_BCH_CONST_M)) || (t != (CONFIG_BCH_CONST_T))) {
-                printk(KERN_ERR "bch encoder/decoder was configured to support "
-                       "parameters m=%d, t=%d only!\n",
-                       CONFIG_BCH_CONST_M, CONFIG_BCH_CONST_T);
-                goto fail;
-        }
-#endif
         if ((m < min_m) || (m > max_m))
                 /*
                  * values of m greater than 15 are not currently supported;
@@ -1287,27 +1293,28 @@ struct bch_control *init_bch(int m, int t, unsigned int prim_poly)
         if (prim_poly == 0)
                 prim_poly = prim_poly_tab[m-min_m];
 
-        bch = kzalloc(sizeof(*bch), GFP_KERNEL);
+        bch = (struct bch_control*)malloc(sizeof(*bch));
         if (bch == NULL)
                 goto fail;
+        memset(bch,0,sizeof(*bch));
 
         bch->m = m;
         bch->t = t;
         bch->n = (1 << m)-1;
         words  = DIV_ROUND_UP(m*t, 32);
         bch->ecc_bytes = DIV_ROUND_UP(m*t, 8);
-        bch->a_pow_tab = bch_alloc((1+bch->n)*sizeof(*bch->a_pow_tab), &err);
-        bch->a_log_tab = bch_alloc((1+bch->n)*sizeof(*bch->a_log_tab), &err);
-        bch->mod8_tab  = bch_alloc(words*1024*sizeof(*bch->mod8_tab), &err);
-        bch->ecc_buf   = bch_alloc(words*sizeof(*bch->ecc_buf), &err);
-        bch->ecc_buf2  = bch_alloc(words*sizeof(*bch->ecc_buf2), &err);
-        bch->xi_tab    = bch_alloc(m*sizeof(*bch->xi_tab), &err);
-        bch->syn       = bch_alloc(2*t*sizeof(*bch->syn), &err);
-        bch->cache     = bch_alloc(2*t*sizeof(*bch->cache), &err);
-        bch->elp       = bch_alloc((t+1)*sizeof(struct gf_poly_deg1), &err);
+        bch->a_pow_tab = (uint16_t*)bch_alloc((1+bch->n)*sizeof(*bch->a_pow_tab), &err);
+        bch->a_log_tab = (uint16_t*)bch_alloc((1+bch->n)*sizeof(*bch->a_log_tab), &err);
+        bch->mod8_tab  = (uint32_t*)bch_alloc(words*1024*sizeof(*bch->mod8_tab), &err);
+        bch->ecc_buf   = (uint32_t*)bch_alloc(words*sizeof(*bch->ecc_buf), &err);
+        bch->ecc_buf2  = (uint32_t*)bch_alloc(words*sizeof(*bch->ecc_buf2), &err);
+        bch->xi_tab    = (unsigned int*)bch_alloc(m*sizeof(*bch->xi_tab), &err);
+        bch->syn       = (unsigned int*)bch_alloc(2*t*sizeof(*bch->syn), &err);
+        bch->cache     = (int*)bch_alloc(2*t*sizeof(*bch->cache), &err);
+        bch->elp       = (struct gf_poly*)bch_alloc((t+1)*sizeof(struct gf_poly_deg1), &err);
 
         for (i = 0; i < ARRAY_SIZE(bch->poly_2t); i++)
-                bch->poly_2t[i] = bch_alloc(GF_POLY_SZ(2*t), &err);
+                bch->poly_2t[i] = (struct gf_poly*)bch_alloc(GF_POLY_SZ(2*t), &err);
 
         if (err)
                 goto fail;
@@ -1322,7 +1329,7 @@ struct bch_control *init_bch(int m, int t, unsigned int prim_poly)
                 goto fail;
 
         build_mod8_tables(bch, genpoly);
-        kfree(genpoly);
+        free(genpoly);
 
         err = build_deg2_base(bch);
         if (err)
@@ -1334,7 +1341,6 @@ fail:
         free_bch(bch);
         return NULL;
 }
-EXPORT_SYMBOL_GPL(init_bch);
 
 /**
  *  free_bch - free the BCH control structure
@@ -1342,28 +1348,22 @@ EXPORT_SYMBOL_GPL(init_bch);
  */
 void free_bch(struct bch_control *bch)
 {
-        unsigned int i;
+    unsigned int i;
 
-        if (bch) {
-                kfree(bch->a_pow_tab);
-                kfree(bch->a_log_tab);
-                kfree(bch->mod8_tab);
-                kfree(bch->ecc_buf);
-                kfree(bch->ecc_buf2);
-                kfree(bch->xi_tab);
-                kfree(bch->syn);
-                kfree(bch->cache);
-                kfree(bch->elp);
+    if (bch) {
+        free(bch->a_pow_tab);
+        free(bch->a_log_tab);
+        free(bch->mod8_tab);
+        free(bch->ecc_buf);
+        free(bch->ecc_buf2);
+        free(bch->xi_tab);
+        free(bch->syn);
+        free(bch->cache);
+        free(bch->elp);
 
-                for (i = 0; i < ARRAY_SIZE(bch->poly_2t); i++)
-                        kfree(bch->poly_2t[i]);
+        for (i = 0; i < ARRAY_SIZE(bch->poly_2t); i++)
+            free(bch->poly_2t[i]);
 
-                kfree(bch);
-        }
+        free(bch);
+    }
 }
-EXPORT_SYMBOL_GPL(free_bch);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Ivan Djelic <ivan.djelic@parrot.com>");
-MODULE_DESCRIPTION("Binary BCH encoder/decoder");
-
