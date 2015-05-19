@@ -61,8 +61,12 @@ int main(int argc, char ** argv)
 {
     int m = 9;
     int t = 5;
-    unsigned int prim_poly = 0; // zero indicates to use the appropriate element from prim_poly_tab
+    unsigned int p = 0; // zero indicates to use the appropriate element from prim_poly_tab
     int ntrials = 1000;
-    return monte_carlo(m,t,prim_poly,ntrials);
+    if (argc>1) m = atoi(argv[1]);
+    if (argc>2) t = atoi(argv[2]);
+    if (argc>3) p = atoi(argv[3]);
+    if (argc>4) ntrials = atoi(argv[4]);
+    return monte_carlo(m,t,p,ntrials);
 }
 
