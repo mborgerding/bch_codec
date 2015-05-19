@@ -28,6 +28,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * struct bch_control - BCH control structure
  * @m:          Galois field order
@@ -75,5 +79,9 @@ void encode_bch(struct bch_control *bch, const uint8_t *data,
 int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
 	       const uint8_t *recv_ecc, const uint8_t *calc_ecc,
 	       const unsigned int *syn, unsigned int *errloc);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _BCH_H */

@@ -61,7 +61,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "bch.h"
+#include "bch_codec.h"
 #include <errno.h>
 
 static
