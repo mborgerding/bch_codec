@@ -1446,6 +1446,25 @@ void encodebits_bch(struct bch_control *bch, const uint8_t *data, uint8_t *ecc)
     unpack_eccbits(bch,ecc);
 }
 
+/**
+ * decodebits_bch - decode received codeword bits and find error locations
+ * @bch:      BCH control structure
+ * @databits:     received data, length = bch->n - bch->ecc_bits
+ * @recv_ecc_bits: received ecc, length =  bch->ecc_bits
+ * @errloc:   output array of error locations
+ *
+ * Returns:
+ *  The number of errors found, or -EBADMSG if decoding failed, or -EINVAL if
+ *  invalid parameters were provided
+ *
+ * if (errloc[i] <  bch->n - bch->ecc_bits ), then
+ *        databits[errloc[i]] is in error
+ * otherwise 
+ *      the i-th error is located in ecc (no need for data correction)
+ *
+ * Note that this function does not perform any data correction by itself, it
+ * merely indicates error locations.
+ */
 int decodebits_bch(struct bch_control *bch, const uint8_t *data, const uint8_t *recv_ecc, unsigned int *errloc)
 {
     int nbytes;
@@ -1469,4 +1488,36 @@ int decodebits_bch(struct bch_control *bch, const uint8_t *data, const uint8_t *
             errloc[k] = ((errloc[k] & ~7)|(7-(errloc[k] & 7))) - nPad;
     }
     return nerr;
+}
+
+/**
+ * correct_bch - correct error locations as found in decode_bch
+ * @bch,@data,@len,@errloc: same as a previous call to decode_bch
+ * @nerr: returned from decode_bch
+ */
+void correct_bch(struct bch_control *bch, uint8_t *data, unsigned int len,unsigned int *errloc, int nerr)
+{
+    int i;
+    for (i=0;i<nerr;++i) {
+        int bi = errloc[i];
+        if ( (bi>>3) < len)
+            data[bi>>3] ^= (1<<(bi&7));
+    }
+
+}
+
+/**
+ * correctbits_bch - correct error locations as found in decodebits_bch
+ * @bch,@databits,@errloc: same as a previous call to decodebits_bch
+ * @nerr: returned from decodebits_bch
+ */
+void correctbits_bch(struct bch_control *bch, uint8_t *databits, unsigned int *errloc, int nerr)
+{
+    const int m = bch->n - bch->ecc_bits;
+    int i;
+    for (i=0;i<nerr;++i) {
+        int bi = errloc[i];
+        if (bi < m)
+            databits[bi] ^= 1;
+    }
 }

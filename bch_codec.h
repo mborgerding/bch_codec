@@ -86,6 +86,12 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
 int decodebits_bch(struct bch_control *bch, const uint8_t *data, 
 	       const uint8_t *recv_ecc, unsigned int *errloc);
 
+
+void correct_bch(struct bch_control *bch, uint8_t *data,unsigned int len, unsigned int *errloc, int nerr);
+
+void correctbits_bch(struct bch_control *bch, uint8_t *databits, unsigned int *errloc, int nerr);
+
+
 #ifdef __cplusplus
 }
 #endif

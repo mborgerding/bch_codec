@@ -41,12 +41,14 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
     cout << "running " << ntrials << " trials of BCH decoding with up to " << t << " errors\n";
     vector<uint8_t> data( msgBits / 8 );
+    vector<uint8_t> dataClean;
     cout << " data.size()=" << data.size() << endl;
 
     for (int trial=0;trial < ntrials;++trial) {
         // make a random message
         for (size_t k=0;k<data.size();++k)
             data[k] = rand()&0xFF;
+        dataClean = data;
 
         // encode it
         vector<uint8_t> ecc( bch->ecc_bytes ,0);
@@ -55,7 +57,6 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
         // introduce up to t errors
         int nerrs = rand() % (t+1);
         vector<unsigned int> errLocIn = randperm( data.size()*8 ,nerrs );
-        sort( errLocIn.begin(),errLocIn.end());
         for (size_t k=0;k < errLocIn.size();++k) {
            int i = errLocIn[k];
            data[i>>3] ^= (1<<(i&7));
@@ -63,16 +64,26 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
         // decode and make sure the right errors were corrected
         vector<unsigned int> errLocOut(t);
-        int ncorrected = decode_bch(bch, &data[0], data.size(),&ecc[0], NULL,NULL,&errLocOut[0]);
-        if (ncorrected<0) {
-            cerr << strerror(-ncorrected) << endl;
+        int nerrFound = decode_bch(bch, &data[0], data.size(),&ecc[0], NULL,NULL,&errLocOut[0]);
+        if (nerrFound != nerrs ) {
+            cerr << "decode_bch return value=" << nerrFound  << " expected " << nerrs <<endl;
+            if (nerrFound<0)
+                cerr << strerror(-nerrFound) << endl;
             return 1;
         }
-        errLocOut.resize(ncorrected);
-        sort( errLocOut.begin(),errLocOut.end());
+        errLocOut.resize(nerrFound);
 
+        sort( errLocIn.begin(),errLocIn.end());
+        sort( errLocOut.begin(),errLocOut.end());
         if (errLocIn != errLocOut) {
-            cout << "Input Errors!= Found Errors !!!!" << endl;
+            cerr << "Input Errors!= Found Errors !!!!" << endl;
+            return 1;
+        }
+
+        correct_bch(bch,&data[0],data.size(),&errLocOut[0],nerrFound);
+
+        if (dataClean != data) {
+            cerr << "data not corrected\n";
             return 1;
         }
     }
@@ -83,24 +94,28 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
     for (int trial=0;trial < ntrials;++trial) {
         for (size_t k=0;k<data.size();++k)
             data[k] = rand()&1;
+        dataClean = data;
+
         vector<uint8_t> ecc(bch->ecc_bits);
         encodebits_bch(bch,&data[0],&ecc[0]);
 
         // introduce up to t errors
         int nerrs = rand() % (t+1);
         vector<unsigned int> errLocIn = randperm( msgBits ,nerrs );
-        sort( errLocIn.begin(),errLocIn.end());
         for (size_t k=0;k < errLocIn.size();++k) 
             data[errLocIn[k]] ^= 1;
         
         // decode and make sure the right errors were corrected
         vector<unsigned int> errLocOut(t);
-        int ncorrected = decodebits_bch(bch, &data[0], &ecc[0], &errLocOut[0]);
-        if (ncorrected<0) {
-            cerr << strerror(-ncorrected) << endl;
+        int nerrFound = decodebits_bch(bch, &data[0], &ecc[0], &errLocOut[0]);
+        if (nerrFound != nerrs) {
+            cerr << "decodebits_bch return value=" << nerrFound  << " expected " << nerrs <<endl;
+            if (nerrFound<0)
+                cerr << strerror(-nerrFound) << endl;
             return 1;
         }
-        errLocOut.resize(ncorrected);
+        errLocOut.resize(nerrFound);
+        sort( errLocIn.begin(),errLocIn.end());
         sort( errLocOut.begin(),errLocOut.end());
         if (errLocIn != errLocOut) {
             cerr << "Errors Location mismatch:" << endl;
@@ -114,9 +129,12 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
             //return 1;
         }   
+        correctbits_bch(bch,&data[0],&errLocOut[0],nerrFound);
+        if (dataClean != data) {
+            cerr << "data not corrected\n";
+            return 1;
+        }
     }
-
-
     free_bch(bch);
     return 0;
 }
