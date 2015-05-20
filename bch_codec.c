@@ -1003,61 +1003,61 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
                const uint8_t *recv_ecc, const uint8_t *calc_ecc,
                const unsigned int *syn, unsigned int *errloc)
 {
-        const unsigned int ecc_words = BCH_ECC_WORDS(bch);
-        unsigned int nbits;
-        int i, err, nroots;
-        uint32_t sum;
+    const unsigned int ecc_words = BCH_ECC_WORDS(bch);
+    unsigned int nbits;
+    int i, err, nroots;
+    uint32_t sum;
 
-        /* sanity check: make sure data length can be handled */
-        if ( len > ((bch->n-bch->ecc_bits+7)/8))
-            return -EINVAL;
+    /* sanity check: make sure data length can be handled */
+    if ( len > ((bch->n-bch->ecc_bits+7)/8))
+        return -EINVAL;
 
-        /* if caller does not provide syndromes, compute them */
-        if (!syn) {
-                if (!calc_ecc) {
-                        /* compute received data ecc into an internal buffer */
-                        if (!data || !recv_ecc)
-                                return -EINVAL;
-                        encode_bch(bch, data, len, NULL);
-                } else {
-                        /* load provided calculated ecc */
-                        load_ecc8(bch, bch->ecc_buf, calc_ecc);
-                }
-                /* load received ecc or assume it was XORed in calc_ecc */
-                if (recv_ecc) {
-                        load_ecc8(bch, bch->ecc_buf2, recv_ecc);
-                        /* XOR received and calculated ecc */
-                        for (i = 0, sum = 0; i < (int)ecc_words; i++) {
-                                bch->ecc_buf[i] ^= bch->ecc_buf2[i];
-                                sum |= bch->ecc_buf[i];
-                        }
-                        if (!sum)
-                                /* no error found */
-                                return 0;
-                }
-                compute_syndromes(bch, bch->ecc_buf, bch->syn);
-                syn = bch->syn;
+    /* if caller does not provide syndromes, compute them */
+    if (!syn) {
+        if (!calc_ecc) {
+            /* compute received data ecc into an internal buffer */
+            if (!data || !recv_ecc)
+                return -EINVAL;
+            encode_bch(bch, data, len, NULL);
+        } else {
+            /* load provided calculated ecc */
+            load_ecc8(bch, bch->ecc_buf, calc_ecc);
         }
+        /* load received ecc or assume it was XORed in calc_ecc */
+        if (recv_ecc) {
+            load_ecc8(bch, bch->ecc_buf2, recv_ecc);
+            /* XOR received and calculated ecc */
+            for (i = 0, sum = 0; i < (int)ecc_words; i++) {
+                bch->ecc_buf[i] ^= bch->ecc_buf2[i];
+                sum |= bch->ecc_buf[i];
+            }
+            if (!sum)
+                /* no error found */
+                return 0;
+        }
+        compute_syndromes(bch, bch->ecc_buf, bch->syn);
+        syn = bch->syn;
+    }
 
-        err = compute_error_locator_polynomial(bch, syn);
-        if (err > 0) {
-                nroots = find_poly_roots(bch, 1, bch->elp, errloc);
-                if (err != nroots)
-                        err = -1;
+    err = compute_error_locator_polynomial(bch, syn);
+    if (err > 0) {
+        nroots = find_poly_roots(bch, 1, bch->elp, errloc);
+        if (err != nroots)
+            err = -1;
+    }
+    if (err > 0) {
+        /* post-process raw error locations for easier correction */
+        nbits = (len*8)+bch->ecc_bits;
+        for (i = 0; i < err; i++) {
+            if (errloc[i] >= nbits) {
+                err = -1;
+                break;
+            }
+            errloc[i] = nbits-1-errloc[i];
+            errloc[i] = (errloc[i] & ~7)|(7-(errloc[i] & 7));
         }
-        if (err > 0) {
-                /* post-process raw error locations for easier correction */
-                nbits = (len*8)+bch->ecc_bits;
-                for (i = 0; i < err; i++) {
-                        if (errloc[i] >= nbits) {
-                                err = -1;
-                                break;
-                        }
-                        errloc[i] = nbits-1-errloc[i];
-                        errloc[i] = (errloc[i] & ~7)|(7-(errloc[i] & 7));
-                }
-        }
-        return (err >= 0) ? err : -EBADMSG;
+    }
+    return (err >= 0) ? err : -EBADMSG;
 }
 
 /*
@@ -1065,27 +1065,27 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
  */
 static int build_gf_tables(struct bch_control *bch, unsigned int poly)
 {
-        unsigned int i, x = 1;
-        const unsigned int k = 1 << deg(poly);
+    unsigned int i, x = 1;
+    const unsigned int k = 1 << deg(poly);
 
-        /* primitive polynomial must be of degree m */
-        if (k != (1u << GF_M(bch)))
-                return -1;
+    /* primitive polynomial must be of degree m */
+    if (k != (1u << GF_M(bch)))
+        return -1;
 
-        for (i = 0; i < GF_N(bch); i++) {
-                bch->a_pow_tab[i] = x;
-                bch->a_log_tab[x] = i;
-                if (i && (x == 1))
-                        /* polynomial is not primitive (a^i=1 with 0<i<2^m-1) */
-                        return -1;
-                x <<= 1;
-                if (x & k)
-                        x ^= poly;
-        }
-        bch->a_pow_tab[GF_N(bch)] = 1;
-        bch->a_log_tab[0] = 0;
+    for (i = 0; i < GF_N(bch); i++) {
+        bch->a_pow_tab[i] = x;
+        bch->a_log_tab[x] = i;
+        if (i && (x == 1))
+            /* polynomial is not primitive (a^i=1 with 0<i<2^m-1) */
+            return -1;
+        x <<= 1;
+        if (x & k)
+            x ^= poly;
+    }
+    bch->a_pow_tab[GF_N(bch)] = 1;
+    bch->a_log_tab[0] = 0;
 
-        return 0;
+    return 0;
 }
 
 /*
@@ -1449,6 +1449,8 @@ void encodebits_bch(struct bch_control *bch, const uint8_t *data, uint8_t *ecc)
 int decodebits_bch(struct bch_control *bch, const uint8_t *data, const uint8_t *recv_ecc, unsigned int *errloc)
 {
     int nbytes;
+    int nerr;
+
     if ( (data==NULL) ||(recv_ecc==NULL)) {
         return -EINVAL; // TODO handle the same calling conventions as decode_bch
     }
@@ -1457,5 +1459,14 @@ int decodebits_bch(struct bch_control *bch, const uint8_t *data, const uint8_t *
 
     pack_eccbits(bch,recv_ecc);
 
-    return decode_bch(bch, bch->databuf, nbytes, bch->databuf + nbytes,NULL,NULL,errloc);
+    nerr = decode_bch(bch, bch->databuf, nbytes, bch->databuf + nbytes,NULL,NULL,errloc);
+    if (nerr>0) {
+        const int K = bch->n - bch->ecc_bits;
+        int nPad=((K+7)/8)*8 - K;
+        // correct the errloc positions
+        int k;
+        for (k=0;k<nerr;++k) 
+            errloc[k] = ((errloc[k] & ~7)|(7-(errloc[k] & 7))) - nPad;
+    }
+    return nerr;
 }

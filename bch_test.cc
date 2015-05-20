@@ -54,7 +54,7 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
         // introduce up to t errors
         int nerrs = rand() % (t+1);
-        vector<unsigned int> errLocIn = randperm( data.size()*8 ,t );
+        vector<unsigned int> errLocIn = randperm( data.size()*8 ,nerrs );
         sort( errLocIn.begin(),errLocIn.end());
         for (size_t k=0;k < errLocIn.size();++k) {
            int i = errLocIn[k];
@@ -62,9 +62,13 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
         }
 
         // decode and make sure the right errors were corrected
-        vector<unsigned int> errLocOut(nerrs+42);
+        vector<unsigned int> errLocOut(t);
         int ncorrected = decode_bch(bch, &data[0], data.size(),&ecc[0], NULL,NULL,&errLocOut[0]);
-        if (ncorrected>=0) errLocOut.resize(ncorrected);
+        if (ncorrected<0) {
+            cerr << strerror(-ncorrected) << endl;
+            return 1;
+        }
+        errLocOut.resize(ncorrected);
         sort( errLocOut.begin(),errLocOut.end());
 
         if (errLocIn != errLocOut) {
@@ -84,7 +88,7 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
         // introduce up to t errors
         int nerrs = rand() % (t+1);
-        vector<unsigned int> errLocIn = randperm( msgBits ,t );
+        vector<unsigned int> errLocIn = randperm( msgBits ,nerrs );
         sort( errLocIn.begin(),errLocIn.end());
         for (size_t k=0;k < errLocIn.size();++k) 
             data[errLocIn[k]] ^= 1;
@@ -92,7 +96,11 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
         // decode and make sure the right errors were corrected
         vector<unsigned int> errLocOut(t);
         int ncorrected = decodebits_bch(bch, &data[0], &ecc[0], &errLocOut[0]);
-        if (ncorrected>=0) errLocOut.resize(ncorrected);
+        if (ncorrected<0) {
+            cerr << strerror(-ncorrected) << endl;
+            return 1;
+        }
+        errLocOut.resize(ncorrected);
         sort( errLocOut.begin(),errLocOut.end());
         if (errLocIn != errLocOut) {
             cerr << "Errors Location mismatch:" << endl;
