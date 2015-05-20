@@ -6,6 +6,29 @@
 #include <string.h>
 using namespace std;
 
+namespace {
+    vector<unsigned int> randperm(int n,int k) // like the matlab/octave function
+    {
+        vector<unsigned int> res;
+        if (2*k > n) {
+            res.resize(n);
+            for (int i=0;i<n;++i) 
+                res[i] = i;
+            random_shuffle( res.begin(),res.end());
+            res.resize(k);
+        }else{
+            res.reserve(k);
+            for (int i=0;i<k;++i) {
+                int next = rand() % n;
+                while ( find(res.begin(),res.end(),next) != res.end() ) {
+                    next = rand() % n;
+                }
+                res.push_back(next);
+            }
+        }
+        return res;
+    }
+}
 
 int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 {
@@ -31,10 +54,7 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
 
         // introduce up to t errors
         int nerrs = rand() % (t+1);
-        vector<unsigned int> errLocIn( data.size()*8 );
-        for (size_t k=0;k<errLocIn.size();++k) errLocIn[k] = k;
-        random_shuffle( errLocIn.begin(),errLocIn.end());
-        errLocIn.resize(nerrs);
+        vector<unsigned int> errLocIn = randperm( data.size()*8 ,t );
         sort( errLocIn.begin(),errLocIn.end());
         for (size_t k=0;k < errLocIn.size();++k) {
            int i = errLocIn[k];
@@ -52,11 +72,48 @@ int monte_carlo(int m,int t,unsigned int prim_poly,int ntrials)
             return 1;
         }
     }
+
+    cout << "now testing bitwise functions\n";
+
+    data.resize(msgBits);
+    for (int trial=0;trial < ntrials;++trial) {
+        for (size_t k=0;k<data.size();++k)
+            data[k] = rand()&1;
+        vector<uint8_t> ecc(bch->ecc_bits);
+        encodebits_bch(bch,&data[0],&ecc[0]);
+
+        // introduce up to t errors
+        int nerrs = rand() % (t+1);
+        vector<unsigned int> errLocIn = randperm( msgBits ,t );
+        sort( errLocIn.begin(),errLocIn.end());
+        for (size_t k=0;k < errLocIn.size();++k) 
+            data[errLocIn[k]] ^= 1;
+        
+        // decode and make sure the right errors were corrected
+        vector<unsigned int> errLocOut(t);
+        int ncorrected = decodebits_bch(bch, &data[0], &ecc[0], &errLocOut[0]);
+        if (ncorrected>=0) errLocOut.resize(ncorrected);
+        sort( errLocOut.begin(),errLocOut.end());
+        if (errLocIn != errLocOut) {
+            cerr << "Errors Location mismatch:" << endl;
+            cerr << "input errors @ ";
+            for (size_t k=0;k < errLocIn.size();++k) 
+                cerr << errLocIn[k] << " ";
+            cerr << "\nfound errors @ ";
+            for (size_t k=0;k < errLocOut.size();++k) 
+                cerr << errLocOut[k] << " ";
+            cerr << "\n";
+
+            //return 1;
+        }   
+    }
+
+
     free_bch(bch);
     return 0;
 }
 
-int bitwise()
+int bit_testvectors()
 {
     // from mktestvectors.m
     unsigned int prim_poly=37;
@@ -86,13 +143,12 @@ int bitwise()
         }
 
         unsigned int errLoc[t];
-        int nerr = decodebits_bch(bch, (const uint8_t*)msgbits[trial], (const uint8_t*)eccbits[trial],NULL,NULL,errLoc);
+        int nerr = decodebits_bch(bch, (const uint8_t*)msgbits[trial], (const uint8_t*)eccbits[trial],errLoc);
         if (nerr) {
             cout << " nerr=" << nerr;
         }
-        
-        cout << endl;
 
+        cout << endl;
     }
     free_bch(bch);
     return fails;
@@ -100,7 +156,7 @@ int bitwise()
 
 int main(int argc, char ** argv)
 {
-    bitwise();
+    bit_testvectors();
     int m = 9;
     int t = 5;
     unsigned int p = 0; // zero indicates to use the appropriate element from prim_poly_tab
@@ -111,4 +167,3 @@ int main(int argc, char ** argv)
     if (argc>4) ntrials = atoi(argv[4]);
     return monte_carlo(m,t,p,ntrials);
 }
-

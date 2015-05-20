@@ -84,8 +84,7 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
 	       const unsigned int *syn, unsigned int *errloc);
 
 int decodebits_bch(struct bch_control *bch, const uint8_t *data, 
-	       const uint8_t *recv_ecc, const uint8_t *calc_ecc,
-	       const unsigned int *syn, unsigned int *errloc);
+	       const uint8_t *recv_ecc, unsigned int *errloc);
 
 #ifdef __cplusplus
 }

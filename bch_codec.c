@@ -57,6 +57,9 @@
  * - WEWoRC 2009, Graz, Austria, LNCS, Springer, July 2009, to appear.
  * [2] [Zin96] V.A. Zinoviev. On the solution of equations of degree 10 over
  * finite fields GF(2^q). In Rapport de recherche INRIA no 2829, 1996.
+ *
+ * History: 
+ *  2015-05  Mark Borgerding (mark@borgerding.net): replaced linux kernel-specific functions, added bitwise encode/decode functions
  */
 
 #include <stdlib.h>
@@ -1006,8 +1009,8 @@ int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
         uint32_t sum;
 
         /* sanity check: make sure data length can be handled */
-        if (8*len > (bch->n-bch->ecc_bits))
-                return -EINVAL;
+        if ( len > ((bch->n-bch->ecc_bits+7)/8))
+            return -EINVAL;
 
         /* if caller does not provide syndromes, compute them */
         if (!syn) {
@@ -1368,6 +1371,12 @@ void free_bch(struct bch_control *bch)
     }
 }
 
+static void check_databuf(struct bch_control *bch)
+{
+    if (bch->databuf == NULL)
+        bch->databuf = (uint8_t*)malloc( ((bch->n - bch->ecc_bits)+7)/8 + bch->ecc_bytes );
+}
+
 static int pack_databuf(  struct bch_control *bch , const uint8_t *data)
 {
     const int K = bch->n - bch->ecc_bits;
@@ -1375,8 +1384,7 @@ static int pack_databuf(  struct bch_control *bch , const uint8_t *data)
     int ndatabytes = (K+7)/8;
     int nPad=ndatabytes*8 - K;
     uint8_t * bytes;
-    if (bch->databuf == NULL)
-        bch->databuf = (uint8_t*)malloc( ndatabytes + bch->ecc_bytes );
+    check_databuf(bch);
     bytes = bch->databuf;
     memset(bytes,0,ndatabytes);
     for (k=0;k<K;++k) {
@@ -1395,10 +1403,28 @@ static int pack_databuf(  struct bch_control *bch , const uint8_t *data)
 static void unpack_eccbits( struct bch_control *bch , uint8_t * ecc)
 {
     int k;
-    uint8_t * ecc_bytes = bch->databuf + ((bch->n - bch->ecc_bits)+7)/8;
+    uint8_t * ecc_bytes;
+    check_databuf(bch);
+    ecc_bytes = bch->databuf + ((bch->n - bch->ecc_bits)+7)/8;
     // expand ecc bytes to bits 
     for (k=0;k<bch->ecc_bits;++k) 
         ecc[k] = (ecc_bytes[k>>3] & (1<<(7-(k&7))))>0;
+}
+
+static void pack_eccbits(struct bch_control *bch ,const uint8_t * ecc)
+{
+    int k;
+    uint8_t * ecc_bytes;
+    check_databuf(bch);
+    ecc_bytes = bch->databuf + ((bch->n - bch->ecc_bits)+7)/8;
+    // expand ecc bytes to bits 
+    memset(ecc_bytes,0,bch->ecc_bytes);
+    for (k=0;k<bch->ecc_bits;++k) {
+        int bit = (ecc[k]&1)!=0; // use only the LSB (can allow sloppy but nice feature of sending in ASCII '0' and '1')
+        uint8_t mask = (1<<(7-(k&7)));
+        if (bit)
+            ecc_bytes[k>>3] |= mask;
+    }
 }
 
 
@@ -1420,18 +1446,16 @@ void encodebits_bch(struct bch_control *bch, const uint8_t *data, uint8_t *ecc)
     unpack_eccbits(bch,ecc);
 }
 
-int decodebits_bch(struct bch_control *bch, const uint8_t *data, 
-              const uint8_t *recv_ecc, const uint8_t *calc_ecc,
-              const unsigned int *syn, unsigned int *errloc)
+int decodebits_bch(struct bch_control *bch, const uint8_t *data, const uint8_t *recv_ecc, unsigned int *errloc)
 {
     int nbytes;
-    if ( (syn!= NULL) || (calc_ecc!=NULL) || (data==NULL) ||(recv_ecc==NULL)) {
+    if ( (data==NULL) ||(recv_ecc==NULL)) {
         return -EINVAL; // TODO handle the same calling conventions as decode_bch
     }
 
     nbytes = pack_databuf(bch,data);
 
-    //decode_bch(bch, bch->databuf, nbytes,
-     //    *   data, @len, @recv_ecc, NULL, NULL, @errloc)
-    return -1;
+    pack_eccbits(bch,recv_ecc);
+
+    return decode_bch(bch, bch->databuf, nbytes, bch->databuf + nbytes,NULL,NULL,errloc);
 }
