@@ -67,6 +67,7 @@ struct bch_control {
 	int            *cache;
 	struct gf_poly *elp;
 	struct gf_poly *poly_2t[4];
+    uint8_t        *databuf;
 };
 
 struct bch_control *init_bch(int m, int t, unsigned int prim_poly);
@@ -76,7 +77,13 @@ void free_bch(struct bch_control *bch);
 void encode_bch(struct bch_control *bch, const uint8_t *data,
 		unsigned int len, uint8_t *ecc);
 
+void encodebits_bch(struct bch_control *bch, const uint8_t *data, uint8_t *ecc);
+
 int decode_bch(struct bch_control *bch, const uint8_t *data, unsigned int len,
+	       const uint8_t *recv_ecc, const uint8_t *calc_ecc,
+	       const unsigned int *syn, unsigned int *errloc);
+
+int decodebits_bch(struct bch_control *bch, const uint8_t *data, 
 	       const uint8_t *recv_ecc, const uint8_t *calc_ecc,
 	       const unsigned int *syn, unsigned int *errloc);
 

@@ -1362,6 +1362,76 @@ void free_bch(struct bch_control *bch)
         for (i = 0; i < ARRAY_SIZE(bch->poly_2t); i++)
             free(bch->poly_2t[i]);
 
+        free(bch->databuf);
+
         free(bch);
     }
+}
+
+static int pack_databuf(  struct bch_control *bch , const uint8_t *data)
+{
+    const int K = bch->n - bch->ecc_bits;
+    int k;
+    int ndatabytes = (K+7)/8;
+    int nPad=ndatabytes*8 - K;
+    uint8_t * bytes;
+    if (bch->databuf == NULL)
+        bch->databuf = (uint8_t*)malloc( ndatabytes + bch->ecc_bytes );
+    bytes = bch->databuf;
+    memset(bytes,0,ndatabytes);
+    for (k=0;k<K;++k) {
+        int bit = (data[k]&1)!=0; // use only the LSB (can allow sloppy but nice feature of sending in ASCII '0' and '1')
+        int i=k+nPad;
+        uint8_t mask = (1<<(7-(i&7)));
+        if (bit)
+            bytes[i>>3] |= mask;
+    }
+    return ndatabytes;
+}
+
+/* 
+ *
+ * */
+static void unpack_eccbits( struct bch_control *bch , uint8_t * ecc)
+{
+    int k;
+    uint8_t * ecc_bytes = bch->databuf + ((bch->n - bch->ecc_bits)+7)/8;
+    // expand ecc bytes to bits 
+    for (k=0;k<bch->ecc_bits;++k) 
+        ecc[k] = (ecc_bytes[k>>3] & (1<<(7-(k&7))))>0;
+}
+
+
+/**
+ * encodebits_bch - calculate BCH ecc parity of data
+ * @bch:   BCH control structure
+ * @data:  data bits to encode , length= bch->n - bch->ecc_bits
+ * @ecc:   output ecc parity bits, length = bch->ecc_bits
+ *
+ * The exact number of computed ecc parity bits is given by member @ecc_bits of
+ * @bch; it may be less than m*t for large values of t.
+ */
+void encodebits_bch(struct bch_control *bch, const uint8_t *data, uint8_t *ecc)
+{
+    int ndatabytes = pack_databuf(bch,data);
+    uint8_t * ecc_bytes = bch->databuf + ndatabytes;
+    memset(ecc_bytes,0,bch->ecc_bytes);
+    encode_bch(bch,bch->databuf,ndatabytes,ecc_bytes);
+    unpack_eccbits(bch,ecc);
+}
+
+int decodebits_bch(struct bch_control *bch, const uint8_t *data, 
+              const uint8_t *recv_ecc, const uint8_t *calc_ecc,
+              const unsigned int *syn, unsigned int *errloc)
+{
+    int nbytes;
+    if ( (syn!= NULL) || (calc_ecc!=NULL) || (data==NULL) ||(recv_ecc==NULL)) {
+        return -EINVAL; // TODO handle the same calling conventions as decode_bch
+    }
+
+    nbytes = pack_databuf(bch,data);
+
+    //decode_bch(bch, bch->databuf, nbytes,
+     //    *   data, @len, @recv_ecc, NULL, NULL, @errloc)
+    return -1;
 }
